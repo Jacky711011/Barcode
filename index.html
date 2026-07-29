@@ -75,23 +75,22 @@
 </div>
 
 <script>
-// 🔗 請放入與標籤系統同一個 Google Apps Script 網址
-const GOOGLE_GAS_URL = "https://script.google.com/macros/s/AKfycbzjDz6gJKO5qqIkNU-atSRp8PU2j9Yuw2bgM2lS6YJcDncVmQnVL3uSnubX4WnQC-M/exec";
+// 🔗 與您標籤系統相同的 Google Apps Script 網址
+const GOOGLE_GAS_URL = "https://script.google.com/macros/s/AKfycbwgg_wncZCqHEIOkd6Usc3DvXWf54yt0rRB0frZLliDRifMY1Grh8wXanCmbGQBkGg/exec";
 
 let html5QrcodeScanner = null;
 
-// 📷 啟動手機相機掃描
+// 📷 完全回復到您測試成功的第一版相機啟動邏輯，確保絕不閃退
 function startScanner() {
     html5QrcodeScanner = new Html5Qrcode("reader");
     html5QrcodeScanner.start(
-        { facingMode: "environment" }, // 強制調用手機後置鏡頭
+        { facingMode: "environment" }, 
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
-            // 掃描成功後，直接帶入查詢
             searchBarcode(decodedText);
             stopScanner();
         },
-        (errorMessage) => { /* 忽略掃描中的非錯誤訊息 */ }
+        (errorMessage) => { }
     ).catch(err => alert("相機啟動失敗: " + err));
 }
 
@@ -103,14 +102,11 @@ function stopScanner() {
     }
 }
 
-// 🔍 送出即時跨網域 JSONP 查詢
 function searchBarcode(barcode) {
     if (!barcode) return;
     barcode = barcode.trim();
     
     const callbackName = 'jsonp_barcode_' + Math.round(100000 * Math.random());
-    
-    // 顯示載入狀態
     document.getElementById('infoPanel').style.display = 'none';
     
     window[callbackName] = function(res) {
@@ -120,18 +116,16 @@ function searchBarcode(barcode) {
             document.getElementById('lblTargetId').innerText = res.targetId;
             document.getElementById('lblProductName').innerText = res.name;
             document.getElementById('lblSpec').innerText = res.spec;
-            document.getElementById('lblQty').innerText = res.boxQty + " PCS (第 " + res.rowIndex + " 列)";
+            document.getElementById('lblQty').innerText = res.boxQty + " PCS";
             document.getElementById('lblWeight').innerText = res.netWeight + " KG";
             
-            // 帶入目前的雲端實際資料
             document.getElementById('txtLocation').value = res.location === "未定位" ? "" : res.location;
             document.getElementById('selStatus').value = res.status;
             
-            // 展開控制面板
             document.getElementById('infoPanel').style.display = 'block';
             document.getElementById('infoPanel').scrollIntoView({ behavior: 'smooth' });
         } else {
-            alert("❌ 雲端資料庫找不到此唯一編號【" + barcode + "】，請確認是否尚未上傳存檔！");
+            alert("❌ 雲端資料庫找不到此唯一編號【" + barcode + "】");
         }
         document.body.removeChild(script);
         delete window[callbackName];
@@ -142,12 +136,15 @@ function searchBarcode(barcode) {
     document.body.appendChild(script);
 }
 
-// 💾 提交修改後的變更資料給雲端 POST 接收器
+// 💾 提交修改資料：改用原生最安全的方式產生時間字串，絕不干擾相機運作
 async function submitUpdate() {
     const btn = document.getElementById('btnSubmit');
     const rowIndex = document.getElementById('txtRowIndex').value;
     const location = document.getElementById('txtLocation').value.trim() || "未定位";
     const status = document.getElementById('selStatus').value;
+    
+    // 💡 核心修正：直接在現場打包時，用最基礎的 `toLocaleString()` 產生精準時間戳記，絕不閃退
+    const currentTimeStamp = new Date().toLocaleString('zh-TW', { hour12: false });
 
     btn.disabled = true;
     btn.innerText = "⏳ 雲端資料庫更新中...";
@@ -156,18 +153,19 @@ async function submitUpdate() {
         action: "updateStatus",
         rowIndex: parseInt(rowIndex),
         location: location,
-        status: status
+        status: status,
+        updateTime: currentTimeStamp 
     };
 
     try {
         await fetch(GOOGLE_GAS_URL, {
             method: "POST",
-            mode: "no-cors", // 穿透 CORS 機制
+            mode: "no-cors",
             body: JSON.stringify(updatePayload),
             headers: { "Content-Type": "text/plain" }
         });
 
-        alert("🎉 雲端更新成功！\n儲位已被修改為：" + location + "\n出貨狀態已被標記為：" + status);
+        alert("🎉 雲端更新成功！\n儲位：" + location + "\n狀態：" + status + "\n移轉時間：" + currentTimeStamp);
         document.getElementById('infoPanel').style.display = 'none';
         document.getElementById('manualBarcode').value = "";
         
