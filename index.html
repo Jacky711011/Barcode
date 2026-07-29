@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鋐洲有限公司 - 智能倉儲物流系統</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- 引入開源網頁掃碼套件 -->
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        body { background-color: #f1f3f5; font-family: "Microsoft JhengHei", sans-serif; padding-top: 20px; }
+        .action-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 8px; overflow: hidden; }
+        .status-badge { font-size: 18px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="text-center mb-4">
+        <h3 class="text-primary fw-bold">📦 鋐洲倉儲物流管理</h3>
+        <p class="text-muted">支援手機相機掃碼 / 儲位變更 / 出貨標記</p>
+    </div>
+
+    <!-- 📷 掃描區塊 -->
+    <div class="action-card text-center">
+        <h5 class="card-title mb-3">📷 開啟相機掃描標籤</h5>
+        <div id="reader"></div>
+        <div class="mt-3">
+            <button class="btn btn-primary" onclick="startScanner()">開啟相機</button>
+            <button class="btn btn-secondary" onclick="stopScanner()">關閉相機</button>
+        </div>
+        <div class="mt-3">
+            <label class="form-label text-muted">或手動輸入唯一編號：</label>
+            <div class="input-group">
+                <input type="text" id="manualBarcode" class="form-control" placeholder="例如: W260728-0018-001">
+                <button class="btn btn-outline-secondary" onclick="searchBarcode(document.getElementById('manualBarcode').value)">查詢</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📝 資料顯示與修改區塊 -->
+    <div class="action-card" id="infoPanel" style="display: none;">
+        <h4 class="text-secondary border-bottom pb-2 mb-3">📋 標籤資料內容</h4>
+        
+        <div class="row g-3">
+            <div class="col-6"><strong>唯一編號：</strong><br><span id="lblBarcode" class="text-danger fw-bold"></span></div>
+            <div class="col-6"><strong>成品品號：</strong><br><span id="lblTargetId"></span></div>
+            <div class="col-6"><strong>品名：</strong><br><span id="lblProductName"></span></div>
+            <div class="col-6"><strong>規格：</strong><br><span id="lblSpec"></span></div>
+            <div class="col-6"><strong>單箱數量：</strong><br><span id="lblQty" class="fw-bold"></span></div>
+            <div class="col-6"><strong>總淨重：</strong><br><span id="lblWeight"></span></div>
+        </div>
+
+        <hr class="my-4">
+
+        <h4 class="text-secondary mb-3">⚙️ 資料異動管理</h4>
+        <input type="hidden" id="txtRowIndex">
+        
+        <div class="mb-3">
+            <label class="form-label fw-bold">📍 變更目前儲位：</label>
+            <input type="text" id="txtLocation" class="form-control form-control-lg" placeholder="請輸入儲位代號，例如: A-01-05">
+        </div>
+
+        <div class="mb-4">
+            <label class="form-label fw-bold">🚚 出貨狀態變更：</label>
+            <select id="selStatus" class="form-select form-select-lg">
+                <option value="未出貨">❌ 未出貨（在庫庫存）</option>
+                <option value="已出貨">🟢 已出貨（扣減庫存）</option>
+            </select>
+        </div>
+
+        <button onclick="submitUpdate()" id="btnSubmit" class="btn btn-success w-100 btn-lg py-3">💾 確定變更並儲存至雲端</button>
+    </div>
+</div>
+
+<script>
+// 🔗 請放入與標籤系統同一個 Google Apps Script 網址
+const GOOGLE_GAS_URL = "https://script.google.com/macros/s/AKfycbzjDz6gJKO5qqIkNU-atSRp8PU2j9Yuw2bgM2lS6YJcDncVmQnVL3uSnubX4WnQC-M/exec";
+
+let html5QrcodeScanner = null;
+
+// 📷 啟動手機相機掃描
+function startScanner() {
+    html5QrcodeScanner = new Html5Qrcode("reader");
+    html5QrcodeScanner.start(
+        { facingMode: "environment" }, // 強制調用手機後置鏡頭
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+            // 掃描成功後，直接帶入查詢
+            searchBarcode(decodedText);
+            stopScanner();
+        },
+        (errorMessage) => { /* 忽略掃描中的非錯誤訊息 */ }
+    ).catch(err => alert("相機啟動失敗: " + err));
+}
+
+function stopScanner() {
+    if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop().then(() => {
+            document.getElementById('reader').innerHTML = "";
+        });
+    }
+}
+
+// 🔍 送出即時跨網域 JSONP 查詢
+function searchBarcode(barcode) {
+    if (!barcode) return;
+    barcode = barcode.trim();
+    
+    const callbackName = 'jsonp_barcode_' + Math.round(100000 * Math.random());
+    
+    // 顯示載入狀態
+    document.getElementById('infoPanel').style.display = 'none';
+    
+    window[callbackName] = function(res) {
+        if (res.found) {
+            document.getElementById('txtRowIndex').value = res.rowIndex;
+            document.getElementById('lblBarcode').innerText = res.barcode;
+            document.getElementById('lblTargetId').innerText = res.targetId;
+            document.getElementById('lblProductName').innerText = res.name;
+            document.getElementById('lblSpec').innerText = res.spec;
+            document.getElementById('lblQty').innerText = res.boxQty + " PCS (第 " + res.rowIndex + " 列)";
+            document.getElementById('lblWeight').innerText = res.netWeight + " KG";
+            
+            // 帶入目前的雲端實際資料
+            document.getElementById('txtLocation').value = res.location === "未定位" ? "" : res.location;
+            document.getElementById('selStatus').value = res.status;
+            
+            // 展開控制面板
+            document.getElementById('infoPanel').style.display = 'block';
+            document.getElementById('infoPanel').scrollIntoView({ behavior: 'smooth' });
+        } else {
+            alert("❌ 雲端資料庫找不到此唯一編號【" + barcode + "】，請確認是否尚未上傳存檔！");
+        }
+        document.body.removeChild(script);
+        delete window[callbackName];
+    };
+
+    const script = document.createElement('script');
+    script.src = `${GOOGLE_GAS_URL}?action=searchBarcode&barcode=${encodeURIComponent(barcode)}&callback=${callbackName}`;
+    document.body.appendChild(script);
+}
+
+// 💾 提交修改後的變更資料給雲端 POST 接收器
+async function submitUpdate() {
+    const btn = document.getElementById('btnSubmit');
+    const rowIndex = document.getElementById('txtRowIndex').value;
+    const location = document.getElementById('txtLocation').value.trim() || "未定位";
+    const status = document.getElementById('selStatus').value;
+
+    btn.disabled = true;
+    btn.innerText = "⏳ 雲端資料庫更新中...";
+
+    const updatePayload = {
+        action: "updateStatus",
+        rowIndex: parseInt(rowIndex),
+        location: location,
+        status: status
+    };
+
+    try {
+        await fetch(GOOGLE_GAS_URL, {
+            method: "POST",
+            mode: "no-cors", // 穿透 CORS 機制
+            body: JSON.stringify(updatePayload),
+            headers: { "Content-Type": "text/plain" }
+        });
+
+        alert("🎉 雲端更新成功！\n儲位已被修改為：" + location + "\n出貨狀態已被標記為：" + status);
+        document.getElementById('infoPanel').style.display = 'none';
+        document.getElementById('manualBarcode').value = "";
+        
+    } catch (error) {
+        alert("❌ 傳輸發生錯誤: " + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "💾 確定變更並儲存至雲端";
+    }
+}
+</script>
+
+</body>
+</html>
