@@ -10,7 +10,7 @@
     <style>
         body { background-color: #f1f3f5; font-family: "Microsoft JhengHei", sans-serif; padding-top: 20px; }
         .action-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; }
-        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #e9ecef; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 8px; overflow: hidden; }
         .status-badge { font-size: 18px; font-weight: bold; }
     </style>
 </head>
@@ -19,19 +19,16 @@
 <div class="container">
     <div class="text-center mb-4">
         <h3 class="text-primary fw-bold">📦 鋐洲倉儲物流管理</h3>
-        <p class="text-muted">支援手機相機掃碼 / 儲位變更 / 出貨標記 / 時間戳記</p>
+        <p class="text-muted">支援手機相機掃碼 / 儲位變更 / 出貨標記</p>
     </div>
 
     <!-- 📷 掃描區塊 -->
     <div class="action-card text-center">
         <h5 class="card-title mb-3">📷 開啟相機掃描標籤</h5>
-        <!-- 調整容器結構防止相機初始化時撐開畫面導致閃退 -->
-        <div style="position: relative; display: inline-block; width: 100%;">
-            <div id="reader"></div>
-        </div>
+        <div id="reader"></div>
         <div class="mt-3">
-            <button class="btn btn-primary btn-lg px-4" onclick="startScanner()">開啟相機</button>
-            <button class="btn btn-secondary btn-lg px-4" onclick="stopScanner()">關閉相機</button>
+            <button class="btn btn-primary" onclick="startScanner()">開啟相機</button>
+            <button class="btn btn-secondary" onclick="stopScanner()">關閉相機</button>
         </div>
         <div class="mt-3">
             <label class="form-label text-muted">或手動輸入唯一編號：</label>
@@ -78,60 +75,42 @@
 </div>
 
 <script>
-// 🔗 與您標籤系統相同的 Google Apps Script 網址
-const GOOGLE_GAS_URL = "https://script.google.com/macros/s/AKfycbwgg_wncZCqHEIOkd6Usc3DvXWf54yt0rRB0frZLliDRifMY1Grh8wXanCmbGQBkGg/exec";
+// 🔗 請放入與標籤系統同一個 Google Apps Script 網址
+const GOOGLE_GAS_URL = "https://script.google.com/macros/s/AKfycbzjDz6gJKO5qqIkNU-atSRp8PU2j9Yuw2bgM2lS6YJcDncVmQnVL3uSnubX4WnQC-M/exec";
 
 let html5QrcodeScanner = null;
 
-// 📷 升級相容性的相機啟動邏輯
+// 📷 啟動手機相機掃描
 function startScanner() {
-    // 如果之前已經有實例，先清理掉防止重複載入當機
-    if (html5QrcodeScanner) {
-        html5QrcodeScanner.clear();
-    }
-    
     html5QrcodeScanner = new Html5Qrcode("reader");
-    
-    // 🔥 改採用最溫和的預設後鏡頭請求方式，並加入防閃退錯誤補捉
     html5QrcodeScanner.start(
-        { facingMode: "environment" }, 
-        { 
-            fps: 10, 
-            qrbox: function(width, height) {
-                // 動態計算掃描框大小，避免小螢幕手機撐爆閃退
-                var minEdge = Math.min(width, height);
-                var qrboxSize = Math.floor(minEdge * 0.65);
-                return { width: qrboxSize, height: qrboxSize };
-            },
-            aspectRatio: 1.0 // 強制正方形比例，提高舊手機硬體相容性
-        },
+        { facingMode: "environment" }, // 強制調用手機後置鏡頭
+        { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
+            // 掃描成功後，直接帶入查詢
             searchBarcode(decodedText);
             stopScanner();
         },
-        (errorMessage) => { /* 忽略間歇性掃描對焦警報 */ }
-    ).catch(err => {
-        console.error("相機啟動失敗原因:", err);
-        alert("⚠️ 相機啟動失敗！\n原因：" + err + "\n\n💡 提示：請確認網址開頭是否為 https:// 且已開通相機授權。若使用 LINE 開啟，請點選右下角改用瀏覽器（Chrome/Safari）打開。");
-    });
+        (errorMessage) => { /* 忽略掃描中的非錯誤訊息 */ }
+    ).catch(err => alert("相機啟動失敗: " + err));
 }
 
 function stopScanner() {
     if (html5QrcodeScanner) {
         html5QrcodeScanner.stop().then(() => {
             document.getElementById('reader').innerHTML = "";
-        }).catch(err => {
-            // 如果已經被清除則直接清空 HTML 容器
-            document.getElementById('reader').innerHTML = "";
         });
     }
 }
 
+// 🔍 送出即時跨網域 JSONP 查詢
 function searchBarcode(barcode) {
     if (!barcode) return;
     barcode = barcode.trim();
     
     const callbackName = 'jsonp_barcode_' + Math.round(100000 * Math.random());
+    
+    // 顯示載入狀態
     document.getElementById('infoPanel').style.display = 'none';
     
     window[callbackName] = function(res) {
@@ -141,16 +120,18 @@ function searchBarcode(barcode) {
             document.getElementById('lblTargetId').innerText = res.targetId;
             document.getElementById('lblProductName').innerText = res.name;
             document.getElementById('lblSpec').innerText = res.spec;
-            document.getElementById('lblQty').innerText = res.boxQty + " PCS";
+            document.getElementById('lblQty').innerText = res.boxQty + " PCS (第 " + res.rowIndex + " 列)";
             document.getElementById('lblWeight').innerText = res.netWeight + " KG";
             
+            // 帶入目前的雲端實際資料
             document.getElementById('txtLocation').value = res.location === "未定位" ? "" : res.location;
             document.getElementById('selStatus').value = res.status;
             
+            // 展開控制面板
             document.getElementById('infoPanel').style.display = 'block';
             document.getElementById('infoPanel').scrollIntoView({ behavior: 'smooth' });
         } else {
-            alert("❌ 雲端資料庫找不到此唯一編號【" + barcode + "】");
+            alert("❌ 雲端資料庫找不到此唯一編號【" + barcode + "】，請確認是否尚未上傳存檔！");
         }
         document.body.removeChild(script);
         delete window[callbackName];
@@ -161,23 +142,12 @@ function searchBarcode(barcode) {
     document.body.appendChild(script);
 }
 
-function getFormattedCurrentTime() {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
-}
-
+// 💾 提交修改後的變更資料給雲端 POST 接收器
 async function submitUpdate() {
     const btn = document.getElementById('btnSubmit');
     const rowIndex = document.getElementById('txtRowIndex').value;
     const location = document.getElementById('txtLocation').value.trim() || "未定位";
     const status = document.getElementById('selStatus').value;
-    const currentTimeStamp = getFormattedCurrentTime();
 
     btn.disabled = true;
     btn.innerText = "⏳ 雲端資料庫更新中...";
@@ -186,19 +156,18 @@ async function submitUpdate() {
         action: "updateStatus",
         rowIndex: parseInt(rowIndex),
         location: location,
-        status: status,
-        updateTime: currentTimeStamp
+        status: status
     };
 
     try {
         await fetch(GOOGLE_GAS_URL, {
             method: "POST",
-            mode: "no-cors",
+            mode: "no-cors", // 穿透 CORS 機制
             body: JSON.stringify(updatePayload),
             headers: { "Content-Type": "text/plain" }
         });
 
-        alert("🎉 雲端更新成功！\n儲位：" + location + "\n狀態：" + status + "\n移轉時間：" + currentTimeStamp);
+        alert("🎉 雲端更新成功！\n儲位已被修改為：" + location + "\n出貨狀態已被標記為：" + status);
         document.getElementById('infoPanel').style.display = 'none';
         document.getElementById('manualBarcode').value = "";
         
